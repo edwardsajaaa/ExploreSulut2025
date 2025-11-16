@@ -4,8 +4,9 @@ using TMPro;
 using System.Collections;
 using System.Collections.Generic;
 
-public class DialogManager : MonoBehaviour
+public class DialogManagerGameplay : MonoBehaviour
 {
+    // --- STRUCT DIALOG ---
     [System.Serializable]
     public class DialogSequence
     {
@@ -15,23 +16,17 @@ public class DialogManager : MonoBehaviour
         public float delayBeforeNext = 0f;
     }
 
-    [System.Serializable]
-    public struct RectOffsets
-    {
-        public float Left;
-        public float Right;
-        public float Top;
-        public float Bottom;
-    }
-
+    // --- ENUM ANIMASI ---
     public enum CharacterEntranceType { FadeScale, SlideInLeft, SlideInRight, BounceScale, PopScale, Flip }
     public enum DialogBackgroundAnimation { FadeIn, PopUp, SlideUp, ScaleUp }
 
+    // --- REFERENSI UI ---
     [Header("UI References")]
     public GameObject characterImage; 
     public TextMeshProUGUI dialogText;
     public Image dialogBackground; 
     
+    // --- PENGATURAN ANIMASI ---
     [Header("Animation Settings")]
     public float characterAnimationDuration = 0.8f;
     public CharacterEntranceType characterEntrance = CharacterEntranceType.FadeScale;
@@ -46,37 +41,36 @@ public class DialogManager : MonoBehaviour
     [Header("Character Switch Animation")]
     public float characterSwitchDuration = 0.5f;
 
+    // --- LIST DIALOG ---
     [Header("Dialog Sequences")]
     public List<DialogSequence> dialogSequences = new List<DialogSequence>();
 
-    [Header("Panel Animation Event")]
-    public RectTransform panelToAnimate; 
-    public float animationDuration = 0.5f;
+    // --- REFERENSI EKSTERNAL (DIGANTI KE CANVASGROUP) ---
+    [Header("External References (Canvas Groups)")]
+    public CanvasGroup panelDialogCanvasGroup;
+    public CanvasGroup panelToShowAfterCanvasGroup;
+    public CanvasGroup panelGameCanvasGroup;
 
-    [Header("Scale Animation")]
-    public bool animateScale = true; 
-    public Vector3 targetScale = new Vector3(1, 1, 1);
+    // --- FADE SETTINGS ---
+    [Header("Scene Fade Settings")]
+    public CanvasGroup fadePanelCanvasGroup; // Panel hitam untuk fade
+    public float fadeInDuration = 1.0f; // Durasi fade in
 
-    [Header("Rect Offsets Animation")]
-    public bool animateRectOffsets = false; 
-    public RectOffsets targetRectOffsets; 
+    [Header("End Transition Settings")]
+    public float endFadeDuration = 0.5f; // Durasi pudar untuk dialog & panel
+    public float delayBeforePanelGame = 1.0f; // Jeda "beberapa detik"
 
-    private bool hasPanelAnimated = false; 
-
-    [Header("External References")]
-    public FadeToScene fadeManager; 
-
-    [Header("Scene Control")]
-    public string sceneToLoadAfter = "";
-
+    // --- VARIABEL PRIVATE ---
     private CanvasGroup characterCanvasGroup;
     private RectTransform characterRectTransform;
     private Image characterImageComponent; 
     private bool isAnimating = false;
     private bool isWaitingForClick = false;
     private int currentDialogIndex = 0;
-    private bool isDialogDone = false;
+    private bool isDialogDone = false; 
     private bool isSkippingTyping = false; 
+
+    // --- FUNGSI UNITY (AWAKE, START, UPDATE) ---
 
     void Awake()
     {
@@ -85,32 +79,55 @@ public class DialogManager : MonoBehaviour
 
     void Start()
     {
+        // Setup UI dialog (sembunyikan/reset)
         if (characterImage != null)
             characterImage.SetActive(false);
-            
         if (dialogText != null)
             dialogText.text = "";
 
-        StartCoroutine(StartSequence());
+        // --- PENGATURAN AWAL PANEL FADE ---
+        // Pastikan panel-panel akhir NON-INTERAKTIF dan TRANSparan
+        if (panelToShowAfterCanvasGroup != null)
+        {
+            panelToShowAfterCanvasGroup.alpha = 0f;
+            panelToShowAfterCanvasGroup.interactable = false;
+            panelToShowAfterCanvasGroup.blocksRaycasts = false;
+            panelToShowAfterCanvasGroup.gameObject.SetActive(true); // HARUS AKTIF
+        }
+        if (panelGameCanvasGroup != null)
+        {
+            panelGameCanvasGroup.alpha = 0f;
+            panelGameCanvasGroup.interactable = false;
+            panelGameCanvasGroup.blocksRaycasts = false;
+            panelGameCanvasGroup.gameObject.SetActive(true); // HARUS AKTIF
+        }
+        
+        // Pastikan panel dialognya aktif dan terlihat di awal
+        if (panelDialogCanvasGroup != null)
+        {
+            panelDialogCanvasGroup.alpha = 1f;
+            panelDialogCanvasGroup.interactable = true;
+            panelDialogCanvasGroup.blocksRaycasts = true;
+            panelDialogCanvasGroup.gameObject.SetActive(true);
+        }
+
+        // Mulai urutan dengan FADE IN
+        StartCoroutine(InitializeSceneWithFade());
     }
 
+    // --- UPDATE DENGAN LOGIKA AKHIR DIALOG ---
     void Update()
     {
-        if (isDialogDone) return; 
+        if (isDialogDone) return; // Hentikan update jika transisi akhir dimulai
 
         if (Input.GetMouseButtonDown(0))
         {
             if (isWaitingForClick)
             {
+                // KASUS 1: Teks sudah selesai, player klik untuk MELANJUTKAN
                 isWaitingForClick = false; 
                 
-                if (panelToAnimate != null && currentDialogIndex == 2 && !hasPanelAnimated)
-                {
-                    hasPanelAnimated = true; 
-                    StartCoroutine(AnimatePanel(panelToAnimate, animationDuration));
-                }
-
-                currentDialogIndex++;
+                currentDialogIndex++; 
 
                 if (currentDialogIndex < dialogSequences.Count)
                 {
@@ -118,29 +135,26 @@ public class DialogManager : MonoBehaviour
                 }
                 else
                 {
+                    // --- LOGIKA AKHIR DIALOG (FADE SEQUENCE) ---
                     Debug.Log("Dialog sequence completed!");
-                    isDialogDone = true;
+                    isDialogDone = true; // Hentikan input di Update()
 
-                    if (fadeManager != null && !string.IsNullOrEmpty(sceneToLoadAfter))
-                    {
-                        fadeManager.PindahSceneDenganFade(sceneToLoadAfter);
-                    }
-                    else
-                    {
-                        Debug.LogWarning("Dialog selesai, tapi FadeManager atau SceneToLoadAfter belum di-set di Inspector.");
-                    }
+                    // Mulai Coroutine transisi akhir
+                    StartCoroutine(EndDialogTransitionSequence());
                 }
             }
             else
             {
-                // KASUS 2: Teks sedang mengetik (isWaitingForClick == false), player klik untuk SKIP
-                isSkippingTyping = true; // Aktifkan flag untuk skip
+                // KASUS 2: Teks sedang mengetik, player klik untuk SKIP
+                isSkippingTyping = true; 
             }
         }
     }
 
+    // --- FUNGSI SETUP ---
     void EnsureReferences()
     {
+        // ... (Kode EnsureReferences Anda tidak berubah) ...
         if (characterImage == null)
         {
             characterImage = FindChildByName(transform, "CharacterImage");
@@ -185,7 +199,7 @@ public class DialogManager : MonoBehaviour
             if (characterRectTransform != null)
                 characterRectTransform.localScale = new Vector3(0.8f, 0.8f, 1f);
             if (characterImageComponent == null)
-                Debug.LogWarning("DialogManager: characterImage (atau child-nya) tidak punya Image component!");
+                Debug.LogWarning("DialogManagerGameplay: characterImage (atau child-nya) tidak punya Image component!");
         }
         if (dialogBackground != null)
         {
@@ -196,6 +210,7 @@ public class DialogManager : MonoBehaviour
 
     GameObject FindChildByName(Transform parent, string name)
     {
+        // ... (Kode FindChildByName Anda tidak berubah) ...
         foreach (Transform child in parent)
         {
             if (child.gameObject.name == name)
@@ -207,21 +222,86 @@ public class DialogManager : MonoBehaviour
         return null;
     }
 
-    // --- COROUTINE UTAMA DIALOG ---
+    // --- COROUTINE FADE DAN DIALOG ---
 
-    IEnumerator StartSequence()
+    // Coroutine helper umum untuk memudarkan CanvasGroup
+    IEnumerator FadeCanvas(CanvasGroup cg, float startAlpha, float endAlpha, float duration)
     {
-        // --- MEMANGGIL FADEIN DARI "BOS" ---
-        if (fadeManager != null)
+        float timer = 0f;
+        while (timer < duration)
         {
-            yield return StartCoroutine(fadeManager.FadeIn());
+            timer += Time.deltaTime;
+            cg.alpha = Mathf.Lerp(startAlpha, endAlpha, timer / duration);
+            yield return null;
+        }
+        cg.alpha = endAlpha;
+    }
+
+    IEnumerator InitializeSceneWithFade()
+    {
+        if (fadePanelCanvasGroup != null)
+        {
+            fadePanelCanvasGroup.gameObject.SetActive(true);
+            fadePanelCanvasGroup.alpha = 1f;
+
+            // 1. Jalankan Fade In (dari hitam ke jelas)
+            yield return StartCoroutine(FadeCanvas(fadePanelCanvasGroup, 1f, 0f, fadeInDuration));
+            
+            // 2. Sembunyikan panel fade
+            fadePanelCanvasGroup.gameObject.SetActive(false);
         }
         else
         {
-            Debug.LogWarning("FadeManager belum di-set di DialogManager! Tidak ada FadeIn.");
+            Debug.LogWarning("FadePanelCanvasGroup belum di-set di Inspector!");
         }
-        // --- BATAS PERUBAHAN ---
+        
+        // 3. Setelah fade selesai, baru mulai dialog
+        StartCoroutine(StartSequence());
+    }
+    
+    // --- COROUTINE BARU: Transisi Akhir Dialog ---
+    IEnumerator EndDialogTransitionSequence()
+    {
+        // 1. Pudarkan PanelDialog
+        if (panelDialogCanvasGroup != null)
+        {
+            Debug.Log("Memudarkan PanelDialog...");
+            yield return StartCoroutine(FadeCanvas(panelDialogCanvasGroup, 1f, 0f, endFadeDuration));
+            panelDialogCanvasGroup.interactable = false;
+            panelDialogCanvasGroup.blocksRaycasts = false;
+            panelDialogCanvasGroup.gameObject.SetActive(false); // Matikan setelah pudar
+        }
 
+        // 2. Munculkan panelToShowAfter (dari pudar ke cerah)
+        if (panelToShowAfterCanvasGroup != null)
+        {
+            Debug.Log("Memunculkan panelToShowAfter...");
+            panelToShowAfterCanvasGroup.gameObject.SetActive(true); // Pastikan aktif
+            yield return StartCoroutine(FadeCanvas(panelToShowAfterCanvasGroup, 0f, 1f, endFadeDuration));
+            panelToShowAfterCanvasGroup.interactable = true;
+            panelToShowAfterCanvasGroup.blocksRaycasts = true;
+        }
+
+        // 3. Tunggu "beberapa detik"
+        Debug.Log("Menunggu jeda...");
+        yield return new WaitForSeconds(delayBeforePanelGame);
+
+        // 4. Munculkan panelGame (dari pudar ke cerah)
+        if (panelGameCanvasGroup != null)
+        {
+            Debug.Log("Memunculkan panelGame...");
+            panelGameCanvasGroup.gameObject.SetActive(true); // Pastikan aktif
+            yield return StartCoroutine(FadeCanvas(panelGameCanvasGroup, 0f, 1f, endFadeDuration));
+            panelGameCanvasGroup.interactable = true;
+            panelGameCanvasGroup.blocksRaycasts = true;
+        }
+
+        Debug.Log("Transisi akhir selesai.");
+    }
+
+    IEnumerator StartSequence()
+    {
+        // ... (Kode StartSequence Anda tidak berubah) ...
         if (characterImage != null)
             characterImage.SetActive(true);
         yield return StartCoroutine(PlayDialogSequence());
@@ -229,9 +309,10 @@ public class DialogManager : MonoBehaviour
 
     IEnumerator PlayDialogSequence()
     {
+        // ... (Kode PlayDialogSequence Anda tidak berubah) ...
         if (dialogSequences.Count == 0)
         {
-            Debug.LogWarning("DialogManager: No dialog sequences assigned!");
+            Debug.LogWarning("DialogManagerGameplay: No dialog sequences assigned!");
             yield break;
         }
         yield return StartCoroutine(AnimateCharacterEntrance());
@@ -245,6 +326,7 @@ public class DialogManager : MonoBehaviour
 
     IEnumerator ShowDialog(int dialogIndex)
     {
+        // ... (Kode ShowDialog Anda tidak berubah) ...
         if (dialogIndex < 0 || dialogIndex >= dialogSequences.Count)
             yield break;
         DialogSequence dialog = dialogSequences[dialogIndex];
@@ -274,19 +356,20 @@ public class DialogManager : MonoBehaviour
             Debug.LogWarning("Dialog " + dialogIndex + " image (sprite) kosong atau characterImageComponent null!");
         }
         yield return StartCoroutine(AnimateDialogBackground());
-        yield return StartCoroutine(TypeText(dialog.dialogText)); // Panggil TypeText
+        yield return StartCoroutine(TypeText(dialog.dialogText)); 
         
-        // PENTING: Pindahkan isWaitingForClick ke SETELAH TypeText selesai
         isWaitingForClick = true;
     }
 
     IEnumerator ShowNextDialog()
     {
+        // ... (Kode ShowNextDialog Anda tidak berubah) ...
         yield return StartCoroutine(ShowDialog(currentDialogIndex));
     }
 
     // --- COROUTINE ANIMASI KARAKTER ---
-    IEnumerator AnimateCharacterEntrance() { /* ... kode Anda ... */ 
+    IEnumerator AnimateCharacterEntrance() { 
+        // ... (Kode Anda tidak berubah) ...
         if (characterImage == null || characterCanvasGroup == null)
             yield break;
         switch (characterEntrance)
@@ -299,7 +382,8 @@ public class DialogManager : MonoBehaviour
             case CharacterEntranceType.Flip: yield return StartCoroutine(FlipEntrance()); break;
         }
     }
-    IEnumerator FadeScaleEntrance() { /* ... kode Anda ... */ 
+    IEnumerator FadeScaleEntrance() { 
+        // ... (Kode Anda tidak berubah) ...
         float t = 0f;
         Vector3 startScale = new Vector3(0.8f, 0.8f, 1f);
         Vector3 endScale = Vector3.one;
@@ -316,7 +400,8 @@ public class DialogManager : MonoBehaviour
         if (characterRectTransform != null)
             characterRectTransform.localScale = endScale;
     }
-    IEnumerator SlideInLeftEntrance() { /* ... kode Anda ... */ 
+    IEnumerator SlideInLeftEntrance() { 
+        // ... (Kode Anda tidak berubah) ...
         if (characterRectTransform == null) yield break;
         float t = 0f;
         Vector2 startPos = new Vector2(-500, characterRectTransform.anchoredPosition.y);
@@ -333,7 +418,8 @@ public class DialogManager : MonoBehaviour
         characterCanvasGroup.alpha = 1;
         characterRectTransform.anchoredPosition = endPos;
     }
-    IEnumerator SlideInRightEntrance() { /* ... kode Anda ... */ 
+    IEnumerator SlideInRightEntrance() { 
+        // ... (Kode Anda tidak berubah) ...
         if (characterRectTransform == null) yield break;
         float t = 0f;
         Vector2 startPos = new Vector2(500, characterRectTransform.anchoredPosition.y);
@@ -350,7 +436,8 @@ public class DialogManager : MonoBehaviour
         characterCanvasGroup.alpha = 1;
         characterRectTransform.anchoredPosition = endPos;
     }
-    IEnumerator BounceScaleEntrance() { /* ... kode Anda ... */ 
+    IEnumerator BounceScaleEntrance() { 
+        // ... (Kode Anda tidak berubah) ...
         float t = 0f;
         Vector3 startScale = Vector3.zero;
         Vector3 endScale = Vector3.one;
@@ -369,7 +456,8 @@ public class DialogManager : MonoBehaviour
         if (characterRectTransform != null)
             characterRectTransform.localScale = endScale;
     }
-    IEnumerator PopScaleEntrance() {
+    IEnumerator PopScaleEntrance() { 
+        // ... (Kode Anda tidak berubah) ...
         float t = 0f;
         Vector3 startScale = new Vector3(1.3f, 1.3f, 1f);
         Vector3 endScale = Vector3.one;
@@ -387,7 +475,8 @@ public class DialogManager : MonoBehaviour
         if (characterRectTransform != null)
             characterRectTransform.localScale = endScale;
     }
-    IEnumerator FlipEntrance() { /* ... kode Anda ... */ 
+    IEnumerator FlipEntrance() { 
+        // ... (Kode Anda tidak berubah) ...
         float t = 0f;
         Vector3 startRotation = new Vector3(0, 90, 0);
         Vector3 endRotation = Vector3.zero;
@@ -408,7 +497,9 @@ public class DialogManager : MonoBehaviour
             characterRectTransform.localEulerAngles = endRotation;
     }
 
-    IEnumerator AnimateDialogBackground() { /* ... kode Anda ... */ 
+    // --- COROUTINE ANIMASI UI LAINNYA ---
+    IEnumerator AnimateDialogBackground() { 
+        // ... (Kode Anda tidak berubah) ...
         if (dialogBackground == null)
             yield break;
         yield return new WaitForSeconds(backgroundDelay);
@@ -443,7 +534,7 @@ public class DialogManager : MonoBehaviour
                     yield return null;
                 }
                 if (bgRect != null)
-                    bgRect.localScale = Vector3.one;
+                    bgRect.localScale = Vector3.one; 
                 break;
         }
         Color finalColor = dialogBackground.color;
@@ -451,35 +542,33 @@ public class DialogManager : MonoBehaviour
         dialogBackground.color = finalColor;
     }
     
-    // --- TYPETEXT BARU DENGAN LOGIKA SKIP ---
+    // --- TYPETEXT DENGAN LOGIKA SKIP ---
     IEnumerator TypeText(string text)
     {
+        // ... (Kode Anda tidak berubah) ...
         if (dialogText == null)
             yield break;
 
-        isSkippingTyping = false; // Reset flag di awal
+        isSkippingTyping = false; 
         dialogText.text = "";
         string displayedText = "";
 
         foreach (char letter in text)
         {
-            // Cek apakah player mau skip
             if (isSkippingTyping)
             {
-                break; // Keluar dari loop
+                break; 
             }
-
             displayedText += letter;
             dialogText.text = displayedText;
             yield return new WaitForSeconds(typingSpeed);
         }
-
-        // Tampilkan teks penuh (baik karena selesai atau di-skip)
         dialogText.text = text;
-        isSkippingTyping = false; // Reset flag untuk jaga-jaga
+        isSkippingTyping = false; 
     }
 
-    IEnumerator SwitchCharacterImage(Sprite newSprite) { /* ... kode Anda ... */ 
+    IEnumerator SwitchCharacterImage(Sprite newSprite) { 
+        // ... (Kode Anda tidak berubah) ...
         Debug.Log("Switching to sprite: " + (newSprite != null ? newSprite.name : "null"));
         float t = 0f;
         while (t < characterSwitchDuration / 2)
@@ -491,7 +580,7 @@ public class DialogManager : MonoBehaviour
         }
         characterImageComponent.sprite = newSprite;
         Debug.Log("Sprite switched to: " + (newSprite != null ? newSprite.name : "null"));
-t = 0f;
+        t = 0f;
         Vector3 startScale = new Vector3(0.9f, 0.9f, 1f);
         Vector3 endScale = Vector3.one;
         while (t < characterSwitchDuration / 2)
@@ -508,62 +597,9 @@ t = 0f;
             characterRectTransform.localScale = endScale;
     }
 
-    // --- COROUTINE PANEL ANIMATION ---
-    
-    IEnumerator AnimatePanel(RectTransform panel, float duration)
-    {
-        if (panel == null)
-        {
-            Debug.LogWarning("Panel To Animate belum di-set di Inspector!");
-            yield break;
-        }
-
-        // Ambil nilai awal
-        Vector3 startScale = panel.localScale;
-        Vector2 startOffsetMin = panel.offsetMin; // (Left, Bottom)
-        Vector2 startOffsetMax = panel.offsetMax; // (-Right, -Top)
-
-        // Tentukan nilai akhir dari Inspector
-        Vector3 endScale = targetScale;
-        Vector2 endOffsetMin = new Vector2(targetRectOffsets.Left, targetRectOffsets.Bottom);
-        Vector2 endOffsetMax = new Vector2(-targetRectOffsets.Right, -targetRectOffsets.Top);
-
-        float t = 0f;
-
-        while (t < duration)
-        {
-            t += Time.deltaTime;
-            float progress = t / duration;
-            float easedProgress = Mathf.SmoothStep(0f, 1f, progress); // Gerakan mulus
-
-            // Animasikan HANYA jika dicentang
-            if (animateScale)
-            {
-                panel.localScale = Vector3.Lerp(startScale, endScale, easedProgress);
-            }
-            if (animateRectOffsets)
-            {
-                panel.offsetMin = Vector2.Lerp(startOffsetMin, endOffsetMin, easedProgress);
-                panel.offsetMax = Vector2.Lerp(startOffsetMax, endOffsetMax, easedProgress);
-            }
-
-            yield return null;
-        }
-
-        // Pastikan sampai di nilai akhir
-        if (animateScale)
-        {
-            panel.localScale = endScale;
-        }
-        if (animateRectOffsets)
-        {
-            panel.offsetMin = endOffsetMin;
-            panel.offsetMax = endOffsetMax;
-        }
-    }
-
     // --- FUNGSI HELPER ---
-    public void AddDialog(string text, float delay = 0f) { /* ... kode Anda ... */ 
+    public void AddDialog(string text, float delay = 0f) { 
+        // ... (Kode Anda tidak berubah) ...
         DialogSequence newDialog = new DialogSequence
         {
             characterName = "",
@@ -574,14 +610,13 @@ t = 0f;
         dialogSequences.Add(newDialog);
     }
     
-    // Fungsi ini tidak dipakai di logika skip, tapi bisa dipakai untuk tombol "Skip All"
     public void SkipAnimation() 
     { 
+        // ... (Kode Anda tidak berubah) ...
         StopAllCoroutines();
         if (dialogText != null && dialogSequences.Count > 0 && currentDialogIndex < dialogSequences.Count)
             dialogText.text = dialogSequences[currentDialogIndex].dialogText;
         
-        // Langsung set ke state menunggu
         isWaitingForClick = true;
         isSkippingTyping = false;
     }

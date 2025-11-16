@@ -1,8 +1,8 @@
 using UnityEngine;
 using UnityEngine.UI;
 using System.Collections;
-using System.Collections.Generic; // Penting untuk List<>
-using TMPro; // Penting untuk TextMeshPro
+using System.Collections.Generic;
+using TMPro;
 
 public class QuizManager : MonoBehaviour
 {
@@ -14,45 +14,95 @@ public class QuizManager : MonoBehaviour
 
     // --- REFERENSI UI (Drag & Drop di Inspector) ---
     [Header("Referensi UI Kuis")]
-    public GameObject quizPanel;         // Panel yang berisi soal dan jawaban
-    public TextMeshProUGUI questionText;    // Teks untuk menampilkan soal
-    public TextMeshProUGUI[] answerTexts;   // Array untuk 4 teks tombol jawaban (A, B, C, D)
-    public Button[] answerButtons;       // Array untuk 4 tombol jawaban
+    public GameObject quizPanel;
+    [Tooltip("Tambahkan komponen 'CanvasGroup' ke quizPanel Anda dan seret ke sini")]
+    public CanvasGroup quizCanvasGroup; // <-- MODIFIKASI: Untuk fade in/out
+    public TextMeshProUGUI questionText;
+    public TextMeshProUGUI[] answerTexts;
+    public Button[] answerButtons;
 
     [Header("Referensi UI Feedback")]
     [Tooltip("Isi 4 gambar 'Benar' sesuai urutan A, B, C, D")]
-    public GameObject[] correctImages; // Array untuk 4 gambar "Benar"
+    public GameObject[] correctImages;
     [Tooltip("Isi 4 gambar 'Salah' sesuai urutan A, B, C, D")]
-    public GameObject[] wrongImages;   // Array untuk 4 gambar "Salah"
-    public float feedbackDuration = 1.0f; // Durasi feedback (1 detik)
+    public GameObject[] wrongImages;
+    public float feedbackDuration = 1.0f;
 
     [Header("Referensi UI Hasil")]
-    public GameObject resultsPanel;      // Panel utama yang muncul di akhir kuis
-    public TextMeshProUGUI finalScoreText;  // Teks untuk menampilkan skor akhir
+    public GameObject resultsPanel;
+    public TextMeshProUGUI finalScoreText; 
     
     [Tooltip("Panel yang muncul jika skor >= 80")]
-    public GameObject successPanel; // Panel berisi teks "Selamat" & 2 tombol
+    public GameObject successPanel;
     [Tooltip("Panel yang muncul jika skor < 80")]
-    public GameObject failPanel;    // Panel berisi teks "Gagal" & 1 tombol
+    public GameObject failPanel;
+    
+    public float fadeDuration = 0.5f; // <-- MODIFIKASI: Durasi fade
 
+    // --- MODIFIKASI: Start() sekarang hanya menyembunyikan panel ---
     void Start()
     {
-        // Sembunyikan semua panel hasil saat mulai
+        // Sembunyikan semua panel hasil
         resultsPanel.SetActive(false);
         successPanel.SetActive(false); 
-        failPanel.SetActive(false);    
+        failPanel.SetActive(false);
         
-        quizPanel.SetActive(true);
+        // Sembunyikan panel kuis menggunakan CanvasGroup
+        if (quizCanvasGroup != null)
+        {
+            quizCanvasGroup.alpha = 0;
+            quizCanvasGroup.interactable = false;
+            quizCanvasGroup.blocksRaycasts = false;
+        }
+        else
+        {
+            quizPanel.SetActive(false); // Fallback jika CanvasGroup tidak di-set
+        }
 
-        // Sembunyikan semua gambar feedback saat mulai
-        foreach (GameObject img in correctImages)
+        // Sembunyikan semua gambar feedback
+        SembunyikanSemuaFeedback();
+    }
+
+    // --- MODIFIKASI: Fungsi ini dipanggil oleh DialogManager ---
+    public void TampilkanKuis()
+    {
+        StartCoroutine(FadeInAndStart());
+    }
+
+    // --- MODIFIKASI: Coroutine untuk fade in lalu memulai kuis ---
+    IEnumerator FadeInAndStart()
+    {
+        // Pastikan panel hasil tersembunyi
+        resultsPanel.SetActive(false);
+        successPanel.SetActive(false); 
+        failPanel.SetActive(false);
+
+        // Tampilkan panel kuis (tapi masih transparan)
+        quizPanel.SetActive(true); 
+
+        if (quizCanvasGroup != null)
         {
-            if (img != null) img.SetActive(false);
+            float t = 0f;
+            while (t < fadeDuration)
+            {
+                t += Time.deltaTime;
+                quizCanvasGroup.alpha = Mathf.Lerp(0, 1, t / fadeDuration);
+                yield return null;
+            }
+            quizCanvasGroup.alpha = 1;
+            quizCanvasGroup.interactable = true;
+            quizCanvasGroup.blocksRaycasts = true;
         }
-        foreach (GameObject img in wrongImages)
-        {
-            if (img != null) img.SetActive(false);
-        }
+        
+        // Panggil logika Start() Anda yang lama
+        MulaiKuis();
+    }
+
+    // --- MODIFIKASI: Logika Start() Anda yang lama dipindah ke sini ---
+    void MulaiKuis()
+    {
+        // Sembunyikan semua gambar feedback
+        SembunyikanSemuaFeedback();
 
         // Reset state
         currentQuestionIndex = 0;
@@ -62,18 +112,15 @@ public class QuizManager : MonoBehaviour
         ShowCurrentQuestion();
     }
 
+
     // Menampilkan soal dan jawaban saat ini
     void ShowCurrentQuestion()
     {
         if (currentQuestionIndex < questions.Count)
         {
-            // Ambil data soal saat ini
             QuestionData q = questions[currentQuestionIndex];
-
-            // Setel teks soal
             questionText.text = q.questionText;
 
-            // Setel teks untuk 4 tombol jawaban
             for (int i = 0; i < answerTexts.Length; i++)
             {
                 if (i < q.answers.Length)
@@ -81,8 +128,6 @@ public class QuizManager : MonoBehaviour
                     answerTexts[i].text = q.answers[i];
                 }
             }
-
-            // Aktifkan kembali tombol
             SetButtonsInteractable(true);
         }
         else
@@ -93,19 +138,14 @@ public class QuizManager : MonoBehaviour
     }
 
     // Fungsi ini akan dipanggil oleh 4 tombol jawaban
-    // Kita setel di Inspector (OnClick)
     public void OnAnswerSelected(int answerIndex)
     {
-        // Matikan semua tombol agar tidak bisa diklik dua kali
         SetButtonsInteractable(false);
-
-        // Cek apakah jawaban benar
         bool isCorrect = (answerIndex == questions[currentQuestionIndex].correctAnswerIndex);
 
         if (isCorrect)
         {
             score++;
-            // Tampilkan gambar "Benar" YANG SPESIFIK sesuai tombol
             if (answerIndex < correctImages.Length && correctImages[answerIndex] != null)
             {
                 StartCoroutine(ShowFeedback(correctImages[answerIndex]));
@@ -113,7 +153,6 @@ public class QuizManager : MonoBehaviour
         }
         else
         {
-            // Tampilkan gambar "Salah" YANG SPESIFIK sesuai tombol
             if (answerIndex < wrongImages.Length && wrongImages[answerIndex] != null)
             {
                 StartCoroutine(ShowFeedback(wrongImages[answerIndex]));
@@ -124,50 +163,62 @@ public class QuizManager : MonoBehaviour
     // Coroutine untuk menampilkan feedback (Benar/Salah) lalu lanjut
     IEnumerator ShowFeedback(GameObject feedbackImage)
     {
-        // Tampilkan gambar feedback
         feedbackImage.SetActive(true);
-
-        // Tunggu selama 'feedbackDuration'
         yield return new WaitForSeconds(feedbackDuration);
-
-        // Sembunyikan gambar feedback
         feedbackImage.SetActive(false);
 
-        // Lanjut ke soal berikutnya
         currentQuestionIndex++;
         ShowCurrentQuestion();
     }
 
-    // Menampilkan panel hasil akhir
+    // --- MODIFIKASI: ShowResults() sekarang memanggil fade out ---
     void ShowResults()
     {
-        quizPanel.SetActive(false); // Sembunyikan panel kuis
+        StartCoroutine(FadeOutQuiz()); // Sembunyikan panel kuis
         resultsPanel.SetActive(true); // Tampilkan panel hasil utama
 
-        // Hitung skor akhir (0-100)
         int finalScore = 0;
         if (questions.Count > 0)
         {
             finalScore = Mathf.RoundToInt(((float)score / questions.Count) * 100);
         }
 
-        // Tampilkan skor
         finalScoreText.text = "Skor Kamu: " + finalScore + "/100";
 
-        // Logika IF ELSE untuk SUKSES atau GAGAL
         if (finalScore >= 80)
         {
-            // Player Lulus
-            successPanel.SetActive(true); // Tampilkan panel sukses
-            failPanel.SetActive(false);   // Sembunyikan panel gagal
+            successPanel.SetActive(true);
+            failPanel.SetActive(false);
         }
         else
         {
-            // Player Gagal
-            successPanel.SetActive(false); // Sembunyikan panel sukses
-            failPanel.SetActive(true);     // Tampilkan panel gagal
+            successPanel.SetActive(false);
+            failPanel.SetActive(true);
         }
     }
+
+    // --- MODIFIKASI: Coroutine untuk fade out panel kuis ---
+    IEnumerator FadeOutQuiz()
+    {
+        if (quizCanvasGroup != null)
+        {
+            float t = 0f;
+            while (t < fadeDuration)
+            {
+                t += Time.deltaTime;
+                quizCanvasGroup.alpha = Mathf.Lerp(1, 0, t / fadeDuration);
+                yield return null;
+            }
+            quizCanvasGroup.alpha = 0;
+            quizCanvasGroup.interactable = false;
+            quizCanvasGroup.blocksRaycasts = false;
+        }
+        else
+        {
+            quizPanel.SetActive(false); // Fallback
+        }
+    }
+
 
     // Helper-function untuk mengaktifkan/menonaktifkan semua tombol
     void SetButtonsInteractable(bool state)
@@ -177,16 +228,38 @@ public class QuizManager : MonoBehaviour
             button.interactable = state;
         }
     }
+
+    // --- MODIFIKASI: RestartQuiz() memanggil MulaiKuis() ---
     public void RestartQuiz()
     {
-        score = 0;
-        currentQuestionIndex = 0;
-
+        // Sembunyikan panel hasil
         resultsPanel.SetActive(false);
         successPanel.SetActive(false); 
-        failPanel.SetActive(false);    
+        failPanel.SetActive(false);
         
+        // Tampilkan panel kuis (sudah di-set Active(true) oleh ShowResults, jadi kita pastikan Alpha-nya)
         quizPanel.SetActive(true);
-        ShowCurrentQuestion();
+        if(quizCanvasGroup != null)
+        {
+            quizCanvasGroup.alpha = 1;
+            quizCanvasGroup.interactable = true;
+            quizCanvasGroup.blocksRaycasts = true;
+        }
+
+        // Mulai ulang kuis
+        MulaiKuis();
+    }
+
+    // Helper-function untuk menyembunyikan feedback
+    void SembunyikanSemuaFeedback()
+    {
+        foreach (GameObject img in correctImages)
+        {
+            if (img != null) img.SetActive(false);
+        }
+        foreach (GameObject img in wrongImages)
+        {
+            if (img != null) img.SetActive(false);
+        }
     }
 }

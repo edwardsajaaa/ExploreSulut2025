@@ -6,7 +6,6 @@ using System.Collections.Generic;
 
 public class DialogManager : MonoBehaviour
 {
-    // --- STRUCT DIALOG ---
     [System.Serializable]
     public class DialogSequence
     {
@@ -16,7 +15,6 @@ public class DialogManager : MonoBehaviour
         public float delayBeforeNext = 0f;
     }
 
-    // --- STRUCT RECT OFFSETS ---
     [System.Serializable]
     public struct RectOffsets
     {
@@ -26,20 +24,15 @@ public class DialogManager : MonoBehaviour
         public float Bottom;
     }
 
-    // --- ENUM ANIMASI ---
     public enum CharacterEntranceType { FadeScale, SlideInLeft, SlideInRight, BounceScale, PopScale, Flip }
     public enum DialogBackgroundAnimation { FadeIn, PopUp, SlideUp, ScaleUp }
 
-    // --- REFERENSI UI ---
     [Header("UI References")]
-    // public Image fadePanel; // <-- DIHAPUS
     public GameObject characterImage; 
     public TextMeshProUGUI dialogText;
     public Image dialogBackground; 
     
-    // --- PENGATURAN ANIMASI ---
     [Header("Animation Settings")]
-    // public float fadeDuration = 1.5f; // <-- DIHAPUS
     public float characterAnimationDuration = 0.8f;
     public CharacterEntranceType characterEntrance = CharacterEntranceType.FadeScale;
     public float typingSpeed = 0.05f;
@@ -53,11 +46,9 @@ public class DialogManager : MonoBehaviour
     [Header("Character Switch Animation")]
     public float characterSwitchDuration = 0.5f;
 
-    // --- LIST DIALOG ---
     [Header("Dialog Sequences")]
     public List<DialogSequence> dialogSequences = new List<DialogSequence>();
 
-    // --- KONTROL ANIMASI PANEL ---
     [Header("Panel Animation Event")]
     public RectTransform panelToAnimate; 
     public float animationDuration = 0.5f;
@@ -72,19 +63,20 @@ public class DialogManager : MonoBehaviour
 
     private bool hasPanelAnimated = false; 
 
-    // --- REFERENSI EKSTERNAL (BARU) ---
     [Header("External References")]
-    public FadeToScene fadeManager; // <-- VARIABEL BARU UNTUK "BOS"
+    public FadeToScene fadeManager; 
 
-    // --- VARIABEL PRIVATE ---
+    [Header("Scene Control")]
+    public string sceneToLoadAfter = "";
+
     private CanvasGroup characterCanvasGroup;
     private RectTransform characterRectTransform;
     private Image characterImageComponent; 
     private bool isAnimating = false;
     private bool isWaitingForClick = false;
     private int currentDialogIndex = 0;
-
-    // --- FUNGSI UNITY (AWAKE, START, UPDATE) ---
+    private bool isDialogDone = false;
+    private bool isSkippingTyping = false; 
 
     void Awake()
     {
@@ -93,8 +85,6 @@ public class DialogManager : MonoBehaviour
 
     void Start()
     {
-        // Tidak perlu set fade panel di sini
-        
         if (characterImage != null)
             characterImage.SetActive(false);
             
@@ -106,43 +96,55 @@ public class DialogManager : MonoBehaviour
 
     void Update()
     {
-        // Listen untuk klik/input player
-        if (isWaitingForClick && Input.GetMouseButtonDown(0))
+        if (isDialogDone) return; 
+
+        if (Input.GetMouseButtonDown(0))
         {
-            // --- LOGIKA PEMICU ANIMASI ---
-            if (currentDialogIndex == 2 && !hasPanelAnimated)
+            if (isWaitingForClick)
             {
-                hasPanelAnimated = true; 
-                StartCoroutine(AnimatePanel(panelToAnimate, animationDuration));
-            }
-            // --- BATAS LOGIKA ANIMASI ---
+                isWaitingForClick = false; 
+                
+                if (currentDialogIndex == 2 && !hasPanelAnimated)
+                {
+                    hasPanelAnimated = true; 
+                    StartCoroutine(AnimatePanel(panelToAnimate, animationDuration));
+                }
 
-            isWaitingForClick = false;
-            currentDialogIndex++;
+                currentDialogIndex++;
 
-            if (currentDialogIndex < dialogSequences.Count)
-            {
-                StartCoroutine(ShowNextDialog());
+                if (currentDialogIndex < dialogSequences.Count)
+                {
+                    StartCoroutine(ShowNextDialog());
+                }
+                else
+                {
+                    Debug.Log("Dialog sequence completed!");
+                    isDialogDone = true;
+
+                    if (fadeManager != null && !string.IsNullOrEmpty(sceneToLoadAfter))
+                    {
+                        fadeManager.PindahSceneDenganFade(sceneToLoadAfter);
+                    }
+                    else
+                    {
+                        Debug.LogWarning("Dialog selesai, tapi FadeManager atau SceneToLoadAfter belum di-set di Inspector.");
+                    }
+                }
             }
             else
             {
-                Debug.Log("Dialog sequence completed!");
+                // KASUS 2: Teks sedang mengetik (isWaitingForClick == false), player klik untuk SKIP
+                isSkippingTyping = true; // Aktifkan flag untuk skip
             }
         }
     }
 
-    // --- FUNGSI SETUP ---
-
     void EnsureReferences()
     {
-        // --- BLOK FADEPANEL DIHAPUS DARI SINI ---
-
-        // Find CharacterImage
         if (characterImage == null)
         {
             characterImage = FindChildByName(transform, "CharacterImage");
         }
-        // ... (sisa EnsureReferences tetap sama)
         if (dialogText == null)
         {
             GameObject dialogObj = GameObject.Find("DialogText");
@@ -225,11 +227,8 @@ public class DialogManager : MonoBehaviour
         yield return StartCoroutine(PlayDialogSequence());
     }
 
-    // --- FUNGSI FADEIN LOKAL DIHAPUS ---
-
     IEnumerator PlayDialogSequence()
     {
-        // (Kode PlayDialogSequence Anda tetap sama)
         if (dialogSequences.Count == 0)
         {
             Debug.LogWarning("DialogManager: No dialog sequences assigned!");
@@ -246,7 +245,6 @@ public class DialogManager : MonoBehaviour
 
     IEnumerator ShowDialog(int dialogIndex)
     {
-        // (Kode ShowDialog Anda tetap sama)
         if (dialogIndex < 0 || dialogIndex >= dialogSequences.Count)
             yield break;
         DialogSequence dialog = dialogSequences[dialogIndex];
@@ -276,7 +274,9 @@ public class DialogManager : MonoBehaviour
             Debug.LogWarning("Dialog " + dialogIndex + " image (sprite) kosong atau characterImageComponent null!");
         }
         yield return StartCoroutine(AnimateDialogBackground());
-        yield return StartCoroutine(TypeText(dialog.dialogText));
+        yield return StartCoroutine(TypeText(dialog.dialogText)); // Panggil TypeText
+        
+        // PENTING: Pindahkan isWaitingForClick ke SETELAH TypeText selesai
         isWaitingForClick = true;
     }
 
@@ -286,7 +286,6 @@ public class DialogManager : MonoBehaviour
     }
 
     // --- COROUTINE ANIMASI KARAKTER ---
-    // (Semua fungsi animasi karakter Anda tetap sama)
     IEnumerator AnimateCharacterEntrance() { /* ... kode Anda ... */ 
         if (characterImage == null || characterCanvasGroup == null)
             yield break;
@@ -351,7 +350,7 @@ public class DialogManager : MonoBehaviour
         characterCanvasGroup.alpha = 1;
         characterRectTransform.anchoredPosition = endPos;
     }
-    IEnumerator BounceScaleEntrance() { 
+    IEnumerator BounceScaleEntrance() { /* ... kode Anda ... */ 
         float t = 0f;
         Vector3 startScale = Vector3.zero;
         Vector3 endScale = Vector3.one;
@@ -370,7 +369,7 @@ public class DialogManager : MonoBehaviour
         if (characterRectTransform != null)
             characterRectTransform.localScale = endScale;
     }
-    IEnumerator PopScaleEntrance() { 
+    IEnumerator PopScaleEntrance() {
         float t = 0f;
         Vector3 startScale = new Vector3(1.3f, 1.3f, 1f);
         Vector3 endScale = Vector3.one;
@@ -409,8 +408,6 @@ public class DialogManager : MonoBehaviour
             characterRectTransform.localEulerAngles = endRotation;
     }
 
-    // --- COROUTINE ANIMASI UI LAINNYA ---
-    // (Fungsi AnimateDialogBackground, TypeText, SwitchCharacterImage tetap sama)
     IEnumerator AnimateDialogBackground() { /* ... kode Anda ... */ 
         if (dialogBackground == null)
             yield break;
@@ -453,19 +450,35 @@ public class DialogManager : MonoBehaviour
         finalColor.a = 1;
         dialogBackground.color = finalColor;
     }
-    IEnumerator TypeText(string text) { /* ... kode Anda ... */ 
+    
+    // --- TYPETEXT BARU DENGAN LOGIKA SKIP ---
+    IEnumerator TypeText(string text)
+    {
         if (dialogText == null)
             yield break;
+
+        isSkippingTyping = false; // Reset flag di awal
         dialogText.text = "";
         string displayedText = "";
+
         foreach (char letter in text)
         {
+            // Cek apakah player mau skip
+            if (isSkippingTyping)
+            {
+                break; // Keluar dari loop
+            }
+
             displayedText += letter;
             dialogText.text = displayedText;
             yield return new WaitForSeconds(typingSpeed);
         }
+
+        // Tampilkan teks penuh (baik karena selesai atau di-skip)
         dialogText.text = text;
+        isSkippingTyping = false; // Reset flag untuk jaga-jaga
     }
+
     IEnumerator SwitchCharacterImage(Sprite newSprite) { /* ... kode Anda ... */ 
         Debug.Log("Switching to sprite: " + (newSprite != null ? newSprite.name : "null"));
         float t = 0f;
@@ -560,9 +573,16 @@ t = 0f;
         };
         dialogSequences.Add(newDialog);
     }
-    public void SkipAnimation() { /* ... kode Anda ... */ 
+    
+    // Fungsi ini tidak dipakai di logika skip, tapi bisa dipakai untuk tombol "Skip All"
+    public void SkipAnimation() 
+    { 
         StopAllCoroutines();
-        if (dialogText != null && dialogSequences.Count > 0)
-            dialogText.text = dialogSequences[dialogSequences.Count - 1].dialogText;
+        if (dialogText != null && dialogSequences.Count > 0 && currentDialogIndex < dialogSequences.Count)
+            dialogText.text = dialogSequences[currentDialogIndex].dialogText;
+        
+        // Langsung set ke state menunggu
+        isWaitingForClick = true;
+        isSkippingTyping = false;
     }
 }
